@@ -1,0 +1,121 @@
+name: Configure machine
+
+on:
+  workflow_dispatch:
+    inputs:
+      NODE_TOKEN:
+        description: NODE_TOKEN used to attach 'tap_node' instance to entity on TAP website.
+        required: true
+        type: string
+      external_rdp_address:
+        description: external_rdp_address provide address to RDP access outside local network
+        required: false
+        type: string
+
+jobs:
+    configure:
+      runs-on: self-hosted
+      defaults:
+        run:
+          shell: powershell
+      steps:
+        - name: Verify tools
+          run: |
+            $tools = @{
+              git    = 'Git.Git'
+              nssm   = 'NSSM.NSSM'
+              python = 'Python.Python.3.12'
+            }
+            foreach ($name in $tools.Keys) {
+              try {
+                & $name --version
+              } catch {
+                throw "Tool '$name' not found. Install it using: `winget install -e --id $($tools[$name]) --scope machine` and RESTART runner."
+              }
+            }
+            try {
+              poetry --version 
+            } catch {
+              throw "Poetry not found. Install it using: pip install poetry and RESTART runner."
+            }
+      
+        - name: Generate ssh-key
+          run: |
+            $sshDir  = Join-Path $HOME ".ssh"
+            $privKey = Join-Path $sshDir "id_ed25519"
+            $pubKey  = Join-Path $sshDir "id_ed25519.pub"
+            if (-not (Test-Path $sshDir)) {
+              New-Item -ItemType Directory -Path $sshDir -Force
+            }
+            if (-not (Test-Path $pubKey)) {
+              Write-Host "Public key not found at $pubKey. Generating a new SSH keypair..."
+              ssh-keygen -t ed25519 -f $privKey -N "" -q
+            }
+            $pub = Get-Content -Raw $pubKey
+            Write-Host ""
+            Write-Host "===== SSH PUBLIC KEY ($pubKey) ====="
+            Write-Host $pub
+            Write-Host "===================================="
+            Write-Host "Waiting 60 seconds so you can copy the key and add it to BitBucket..."
+            Start-Sleep -Seconds 60
+
+        - name: Clone code
+          working-directory: 'C:\'
+          run: |
+              if (-not (Test-Path 'tap_node')) {
+                git clone `
+                  -c core.sshCommand='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' `
+                  ssh://git@luxproject.luxoft.com:7999/stvtap/tap_node.git
+              } else {
+                Write-Host "'tap_node' repo already cloned, skipping..."
+              }
+
+        - name: Create target user
+          run: |
+              $usr = 'tap'
+              $plainPwd = 'LeedaZA8'
+              $securePwd = ConvertTo-SecureString $plainPwd -AsPlainText -Force
+              $user = Get-LocalUser -Name $usr -ErrorAction SilentlyContinue
+              if ($null -ne $user) {
+                Write-Host "Local user '$usr' already exists, skipping creation..."
+              } else {
+                New-LocalUser `
+                  -Name $usr `
+                  -Password $securePwd `
+                  -FullName $usr `
+                  -Description "tap user" `
+                  -PasswordNeverExpires:$true `
+                  -UserMayNotChangePassword:$true
+                Add-LocalGroupMember -Group 'Administrators' -Member $usr
+                Write-Host "Local user '$usr' created, default password is '$plainPwd'."
+              }
+              
+        - name: Create service
+          run: |
+            $serviceName = 'tap_node'
+            if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+              Write-Host "'tap_node' service already exists, skipping creation..."
+            } else { 
+              $sourcesDir = 'C:\tap_node'
+              $runScript = Join-Path $sourcesDir 'run.ps1'
+              $logFile = Join-Path $sourcesDir 'node.log'
+              nssm install $serviceName "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+              nssm set $serviceName AppParameters "-NoProfile -ExecutionPolicy Bypass -File `"$runScript`""
+              nssm set $serviceName AppDirectory $sourcesDir
+              nssm set $serviceName AppStdout $logFile
+              nssm set $serviceName AppStderr $logFile
+              sc.exe sdset tap_node "D:(A;;CCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;BU)"
+            }
+            reg query "HKLM\SYSTEM\CurrentControlSet\Services\$serviceName\Parameters" /s
+            
+        - name: Setting global envars
+          run: |
+            [Environment]::SetEnvironmentVariable('NODE_TOKEN', '${{ inputs.NODE_TOKEN }}', 'Machine')
+            $external = '${{ inputs.external_rdp_address }}'
+            if (-not [string]::IsNullOrWhiteSpace($external)) {
+              [Environment]::SetEnvironmentVariable('RDP_HOST', $external, 'Machine')
+              Write-Host "EXTERNAL_RDP_ADDRESS set to '$external'"
+            } else {
+              Write-Host "external_rdp_address not provided, skipping..."
+            }
+            Write-Host "Installation done 🎉 Run `update.yaml` workflow to start up tap_node."
