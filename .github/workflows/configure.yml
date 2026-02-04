@@ -19,25 +19,11 @@ jobs:
         run:
           shell: powershell
       steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+        
         - name: Verify tools
-          run: |
-            $tools = @{
-              git    = 'Git.Git'
-              nssm   = 'NSSM.NSSM'
-              python = 'Python.Python.3.12'
-            }
-            foreach ($name in $tools.Keys) {
-              try {
-                & $name --version
-              } catch {
-                throw "Tool '$name' not found. Install it using: `winget install -e --id $($tools[$name]) --scope machine` and RESTART runner."
-              }
-            }
-            try {
-              poetry --version 
-            } catch {
-              throw "Poetry not found. Install it using: pip install poetry and RESTART runner."
-            }
+          uses: ./.github/preflight
       
         - name: Generate ssh-key
           run: |

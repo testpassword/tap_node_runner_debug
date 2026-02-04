@@ -27,12 +27,11 @@ jobs:
         working-directory: 'C:\tap_node'
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4      
+
       - name: Verify tools
-        run: |
-          $tools = @('nssm', 'git', 'python', 'poetry')
-          foreach ($tool in $tools) {
-            & $tool --version
-          }
+        uses: ./.github/preflight
 
       - name: Pull changes
         run: |

@@ -1,0 +1,22 @@
+name: Verify required tools
+description: Verifies that required system tools are installed
+
+runs:
+  using: composite
+  steps:
+    - name: Verify tools
+      shell: powershell
+      run: |
+        $tools = @{
+          git    = 'Git.Git'
+          nssm   = 'NSSM.NSSM'
+          python = 'Python.Python.3.12'
+        }
+        foreach ($name in $tools.Keys) {
+          if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
+            throw "Tool '$name' not found. Install it using: 'winget install -e --id $($tools[$name]) --scope machine' and RESTART runner."
+          }
+        }
+        if (-not (Get-Command poetry -ErrorAction SilentlyContinue)) {
+          throw "Poetry not found. Install it using: 'pip install poetry' and RESTART runner."
+        }
