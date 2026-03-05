@@ -46,6 +46,7 @@ jobs:
           Remove-Item -Path .venv -Recurse -Force -ErrorAction SilentlyContinue
           python -m venv .venv
           poetry env use .venv/Scripts/python.exe
+          Remove-Item poetry.lock -ErrorAction SilentlyContinue
           poetry install
 
       - name: Generate run script
